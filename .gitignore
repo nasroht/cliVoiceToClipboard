@@ -12,6 +12,7 @@
 # Go build cache & dist
 bin/
 dist/
+*.zip
 
 # Whisper models (large binary weights)
 models/*.bin
