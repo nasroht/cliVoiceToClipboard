@@ -5,148 +5,120 @@
 [![Platform: Windows 11](https://img.shields.io/badge/Platform-Windows%2011-0078D4.svg)](https://microsoft.com)
 [![Go Version](https://img.shields.io/badge/Go-1.22%2B-00ADD8.svg)](https://golang.org)
 
-High-performance Windows 11 voice-to-text clipboard companion written in Go.
+High-performance Windows 11 voice-to-text clipboard companion written in Go. Operates with a **single-process feel** by managing `whisper.cpp` as an invisible, self-terminating background sidecar.
 
-Hold a push-to-talk key to speak, release to instantly transcribe locally via `whisper.cpp`, and press **CTRL+V** in World of Warcraft or any game or chat client to paste your message.
+Hold a push-to-talk key to speak, release to instantly transcribe speech locally on your GPU/CPU, and press **CTRL+V** in World of Warcraft, Discord, or any desktop application to paste your message.
 
 ---
 
 ## Table of Contents
-- [Core Objective](#core-objective)
-- [Strict Gaming Policy & TOS Compliance](#strict-gaming-policy--tos-compliance)
-- [Hardware Targets](#hardware-targets)
-- [Architecture & Workflow](#architecture--workflow)
+- [Core Objectives & Single-Process Feel](#core-objectives--single-process-feel)
+- [Strict Gaming Policy & Anti-Cheat TOS Compliance](#strict-gaming-policy--anti-cheat-tos-compliance)
+- [Hardware Target Optimizations](#hardware-target-optimizations)
+- [Silent Sidecar Architecture](#silent-sidecar-architecture)
 - [Quick Start Guide](#quick-start-guide)
-  - [1. Download Precompiled whisper-server](#1-download-precompiled-whisper-server)
-  - [2. Download Model Weights](#2-download-model-weights)
-  - [3. Build and Run v2c](#3-build-and-run-v2c)
+  - [1. Download Precompiled whisper-server & Weights](#1-download-precompiled-whisper-server--weights)
+  - [2. Compile & Run](#2-compile--run)
 - [CLI Options & Flags](#cli-options--flags)
 - [Supported Hotkeys](#supported-hotkeys)
+- [Project Layout](#project-layout)
 - [License](#license)
 
 ---
 
-## Core Objective
+## Core Objectives & Single-Process Feel
 
-* **Lightweight Background Daemon**: Sits quietly in the background with negligible CPU/memory overhead.
-* **Instant Push-to-Talk (PTT)**: Captures audio only while your assigned key is held down.
-* **Zero Cloud Latency / 100% Local**: Processes audio on your local machine using `whisper.cpp`—no subscriptions, external APIs, or latency.
-* **Direct to Windows Clipboard**: Transcribed text is cleaned and copied immediately to the Windows clipboard ready for manual pasting with **CTRL+V**.
-* **Audio Feedback**: Subtle Windows auditory notification chime (`MessageBeep`) sounds upon completion so you never have to look away from your crosshair or raid frame.
+* **Invisible Sidecar Process**: `whisper-server.exe` launches silently with `CREATE_NO_WINDOW` (0x08000000). No flashing console windows or taskbar icons appear.
+* **Windows Job Object Protection**: Child processes are assigned to a Windows Job Object configured with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`. If `v2c` is closed, killed via Task Manager, crashes, or receives `SIGINT`, the Windows kernel forcefully kills `whisper-server.exe` immediately—guaranteeing **zero orphan/zombie processes**.
+* **Automatic AppData Setup**: Automatically checks and extracts sidecar binaries and models to `%LOCALAPPDATA%/v2c/bin/` on startup.
+* **Zero External Cloud Latency**: 100% offline and local inference powered by `whisper.cpp`.
+* **Low-Overhead Hotkey Polling**: 15ms ticker utilizing passive `user32.dll!GetAsyncKeyState` (<0.01% CPU usage).
+* **Native Audio Notification**: Triggers non-intrusive Windows audio feedback via `user32.dll!MessageBeep(0)` so you know text is ready without looking away from your game.
 
 ---
 
-## Strict Gaming Policy & TOS Compliance
+## Strict Gaming Policy & Anti-Cheat TOS Compliance
 
 > [!IMPORTANT]
 > **World of Warcraft & Anti-Cheat Safety Guarantee**
 > 
-> To strictly comply with Blizzard Entertainment policies and gaming anti-cheat systems (Warden, Easy Anti-Cheat, BattlEye, Vanguard), `cliVoiceToClipboard`:
+> To strictly comply with Blizzard Entertainment policies and gaming anti-cheat systems (Warden, Easy Anti-Cheat, BattlEye, Vanguard):
 > 
-> 1. **NEVER simulates keyboard presses or keystrokes**: There are **zero** calls to `SendInput`, `keybd_event`, or virtual keyboard injection. You retain 100% manual control over pasting via **CTRL+V**.
-> 2. **NEVER interacts with game window hooks**: No `SetWindowsHookEx` or intrusive global keyboard hooks that could interfere with game input or trigger security alerts.
-> 3. **NEVER touches or reads game memory**: Does not inspect game processes, windows, handles, or memory spaces.
-> 4. **Only passive OS interactions**: Reads global hotkey state via passive `GetAsyncKeyState`, streams microphone input via standard Windows WASAPI (`malgo`), and writes text to the standard Windows clipboard.
+> 1. **ZERO Keystroke Synthesis**: Does **NOT** call `SendInput`, `keybd_event`, or virtual key injection. You retain 100% manual control over pasting via **CTRL+V**.
+> 2. **NO Window Hooks**: Does **NOT** install global Windows message hooks (`SetWindowsHookEx`) or intercept application input queues.
+> 3. **NO Game Process or Memory Interaction**: Never inspects, opens handles to, or reads process memory from any game.
+> 4. **Standard Windows Subsystems Only**: Only queries the hardware keyboard state for its own assigned trigger key, captures audio via Windows WASAPI (`malgo`), and writes text to the standard Windows clipboard.
 
 ---
 
-## Hardware Targets
+## Hardware Target Optimizations
 
-| Hardware | Role | Acceleration & Optimization |
+| Hardware | Target Role | Flags & Tuning |
 | :--- | :--- | :--- |
-| **NVIDIA GeForce RTX 5080** | **Primary GPU Target** | CUDA acceleration offloading all layers (`-ngl 99`) for lightning-fast sub-100ms transcription latency. |
-| **AMD Ryzen 7 9800X3D** | **CPU Fallback Target** | Zen 5 3D V-Cache architecture with native AVX-512 instructions, optimized with dedicated worker threads (`-t 8`). |
+| **NVIDIA GeForce RTX 5080** | **Primary GPU (CUDA)** | Blackwell architecture with full layer offloading (`-ngl 99`) for sub-100ms inference latency. |
+| **AMD Ryzen 7 9800X3D** | **CPU Fallback (AVX-512)** | Zen 5 3D V-Cache architecture with native AVX-512 vectorization, tuned to 6 dedicated threads (`-t 6`) to prevent gaming frame drops. |
 
 ---
 
-## Architecture & Workflow
+## Silent Sidecar Architecture
 
 ```mermaid
-flowchart LR
-    A["Push-to-Talk Key Held (F12)"] -->|"GetAsyncKeyState"| B["malgo WASAPI Capture"]
-    B -->|"In-Memory PCM Buffer"| C["WAV 16kHz Mono Encoder"]
-    C -->|"HTTP Multipart POST /inference"| D["whisper-server.exe\n(CUDA RTX 5080 / 9800X3D AVX-512)"]
-    D -->|"Transcribed Text"| E["Sanitize & Clean Text"]
-    E -->|"github.com/atotto/clipboard"| F["Windows Clipboard"]
-    F -->|"MessageBeep (user32.dll)"| G["Auditory Chime (Ding!)"]
-    G --> H["User Presses CTRL+V"]
-```
+flowchart TD
+    subgraph Parent ["Go Daemon (v2c)"]
+        A["main.go Entrypoint"] --> B["Sidecar Extractor\n(%LOCALAPPDATA%/v2c/bin)"]
+        B --> C["Windows Job Object\n(KILL_ON_JOB_CLOSE)"]
+        C --> D["os/exec with CREATE_NO_WINDOW"]
+        E["15ms Hotkey Poller\n(GetAsyncKeyState)"] --> F["malgo Audio Streamer\n(16 kHz Mono PCM)"]
+        F --> G["In-Memory WAV Encoder"]
+        G --> H["Multipart HTTP POST /inference"]
+        I["Clipboard Writer\n(github.com/atotto/clipboard)"]
+        J["Native Chime\n(user32.dll MessageBeep(0))"]
+    end
 
-1. **PTT Detection**: Background polling loop queries `user32.dll!GetAsyncKeyState` at 100 Hz (~0% CPU).
-2. **Audio Capture**: While key is held, `github.com/gen2brain/malgo` streams microphone audio directly into an in-memory PCM buffer.
-3. **WAV Serialization**: Upon key release, raw PCM audio is packaged into a standard 16 kHz 16-bit mono RIFF WAVE buffer in RAM.
-4. **Local Inference**: Audio buffer is transmitted over HTTP multipart POST to the local `whisper-server` (`/inference`).
-5. **Text Sanitization**: Hallucinated Whisper tokens (e.g., `[BLANK_AUDIO]`, `[music]`, `(silence)`) and excessive whitespaces are stripped.
-6. **Clipboard & Chime**: The cleaned string is written to the Windows clipboard via `github.com/atotto/clipboard` and an audio chime plays.
+    subgraph Sidecar ["Silent Child Process"]
+        D --> K["whisper-server.exe\n(NVIDIA RTX 5080 / 9800X3D)"]
+    end
+
+    H --> K
+    K -->|"Transcribed JSON"| I
+    I --> J
+```
 
 ---
 
 ## Quick Start Guide
 
-### 1. Download Precompiled whisper-server
+### 1. Download Precompiled whisper-server & Weights
 
-Precompiled Windows releases of `whisper.cpp` are available directly from the [whisper.cpp Releases page](https://github.com/ggerganov/whisper.cpp/releases):
+Precompiled releases are available directly from the [whisper.cpp Releases page](https://github.com/ggerganov/whisper.cpp/releases):
 
-#### For NVIDIA CUDA Acceleration (RTX 5080, RTX 40/50 series):
-Download the CUDA build archive:
-* `whisper-cublas-12.x-bin-x64.zip` (or the latest CUDA release).
-* Extract `whisper-server.exe` and its accompanying `.dll` files (such as `cublas64_*.dll`, `cudart64_*.dll`, etc.) into your project directory or `bin/`.
+* **For NVIDIA RTX 5080 (CUDA)**: Download `whisper-cublas-12.x-bin-x64.zip`. Place `whisper-server.exe` and its companion DLLs into `./bin/` or `%LOCALAPPDATA%\v2c\bin\`.
+* **For CPU AVX-512 (AMD Ryzen 7 9800X3D)**: Download `whisper-bin-x64.zip`. Place `whisper-server.exe` into `./bin/` or `%LOCALAPPDATA%\v2c\bin\`.
 
-#### For CPU AVX-512 Fallback (AMD Ryzen 7 9800X3D / Intel CPUs):
-Download the standard Windows 64-bit build archive:
-* `whisper-bin-x64.zip`.
-* Extract `whisper-server.exe` into your project directory or `bin/`.
-
----
-
-### 2. Download Model Weights
-
-Download your desired GGML model format from Hugging Face:
-
-| Model | File Size | Recommended Use Case | Download Link |
-| :--- | :--- | :--- | :--- |
-| **base.en** | ~142 MB | Fastest English transcription, minimal VRAM | [Download ggml-base.en.bin](https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin) |
-| **base** | ~142 MB | Multilingual default | [Download ggml-base.bin](https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin) |
-| **small** | ~466 MB | High accuracy for gaming callouts | [Download ggml-small.bin](https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin) |
-| **medium** | ~1.5 GB | Superior multilingual accuracy | [Download ggml-medium.bin](https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin) |
-
-Save your downloaded model in the `models/` directory:
+#### Download Model Weights
 ```powershell
-# Example: Download ggml-base.bin via PowerShell
+# Fast base model (~142 MB):
 Invoke-WebRequest -Uri "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin" -OutFile "models/ggml-base.bin"
 ```
 
 ---
 
-### 3. Build and Run v2c
+### 2. Compile & Run
 
 #### Prerequisites
-* Windows 11 64-bit
-* Go 1.22+ installed
-* A C compiler for CGo (`gcc` / `clang` via [LLVM-MinGW](https://github.com/mstorsjo/llvm-mingw) or [WinLibs](https://winlibs.com/)):
-  ```powershell
-  # Install LLVM-MinGW via winget:
-  winget install MartinStorsjo.LLVM-MinGW.UCRT
-  ```
+* Windows 11 (64-bit AMD64)
+* Go 1.22+
+* C compiler for CGo (`clang` or `gcc` via `winget install MartinStorsjo.LLVM-MinGW.UCRT`)
 
-#### Build
 ```powershell
-# Clone repository
-git clone https://github.com/nasroht/cliVoiceToClipboard.git
-cd cliVoiceToClipboard
-
-# Compile executable
+# Compile daemon
 go build -o v2c.exe ./cmd/v2c
-```
 
-#### Run with CUDA (Default, RTX 5080)
-```powershell
+# Launch with CUDA acceleration (RTX 5080)
 .\v2c.exe --backend cuda --model models/ggml-base.bin --hotkey F12
-```
 
-#### Run with CPU (Ryzen 7 9800X3D AVX-512)
-```powershell
-.\v2c.exe --backend cpu --model models/ggml-base.bin --threads 8 --hotkey F12
+# Launch with CPU fallback (Ryzen 7 9800X3D)
+.\v2c.exe --backend cpu --model models/ggml-base.bin --threads 6 --hotkey F12
 ```
 
 ---
@@ -155,63 +127,65 @@ go build -o v2c.exe ./cmd/v2c
 
 | Flag | Default | Description |
 | :--- | :--- | :--- |
-| `--backend` | `cuda` | Inference backend: `cuda` (NVIDIA RTX 5080 with `-ngl 99`) or `cpu` (9800X3D AVX-512 with `-ngl 0 -t 8`). |
-| `--model` | `models/ggml-base.bin` | Path to the GGML model weights file. |
-| `--port` | `8080` | Port for the local `whisper-server` HTTP API. |
+| `--backend` | `cuda` | Inference backend: `cuda` (RTX 5080 with `-ngl 99`) or `cpu` (9800X3D with `-ngl 0 -t 6`). |
+| `--model` | `models/ggml-base.bin` | Path or filename of the GGML model weights. |
+| `--port` | `8080` | Port for the local whisper server HTTP endpoint. |
 | `--hotkey` | `0x7B` | Virtual key code (`0x7B`) or friendly name (`F12`, `CAPSLOCK`, `RALT`, etc.). |
-| `--beep` | `true` | Play Windows auditory chime (`MessageBeep`) on completion. |
-| `--language` | `auto` | Transcription language code (e.g. `en`, `de`, `fr`) or `auto`. |
-| `--server-bin` | `whisper-server.exe` | Path to the `whisper-server` executable. |
-| `--no-server` | `false` | Connect to an existing running whisper server without spawning a subprocess. |
-| `--threads` | `8` | Dedicated CPU threads when using `--backend cpu`. |
+| `--chime` | `true` | Native audio chime (`MessageBeep(0)`) on clipboard copy. |
+| `--language` | `auto` | Transcription language code (e.g. `en`, `de`) or `auto`. |
+| `--threads` | `6` | Dedicated CPU threads for CPU inference mode. |
+| `--server-bin` | `""` | Optional explicit path to `whisper-server.exe`. |
+| `--no-server` | `false` | Connect to an existing external whisper server without spawning a sidecar. |
 
 ---
 
 ## Supported Hotkeys
 
-The `--hotkey` flag accepts hexadecimal virtual key codes, decimal codes, or friendly key names:
-
-* **Function keys**: `F1` through `F24` (Default: `F12` = `0x7B`)
-* **Modifier keys**: `LALT`, `RALT`, `LCTRL`, `RCTRL`, `LSHIFT`, `RSHIFT`
-* **Special keys**: `CAPSLOCK`, `SPACE`, `TAB`, `PAUSE`, `SCROLLLOCK`, `TILDE` / `GRAVE`
+The `--hotkey` flag supports hexadecimal codes, decimal codes, and human-friendly key names:
+* **Function Keys**: `F1` through `F24` (Default: `F12` = `0x7B`)
+* **Modifier Keys**: `LALT`, `RALT`, `LCTRL`, `RCTRL`, `LSHIFT`, `RSHIFT`
+* **Special Keys**: `CAPSLOCK`, `SPACE`, `TAB`, `PAUSE`, `SCROLLLOCK`, `TILDE` / `GRAVE`
 * **Navigation**: `INSERT`, `DELETE`, `HOME`, `END`, `PAGEUP`, `PAGEDOWN`
 * **Numpad**: `NUMPAD0` through `NUMPAD9`
 * **Mouse Extra Buttons**: `XBUTTON1` (`0x05`), `XBUTTON2` (`0x06`)
-* **Hex / Raw**: Any virtual key code (e.g. `0x7B`, `123`)
 
 ---
 
-## Project Structure
+## Project Layout
 
 ```
 cliVoiceToClipboard/
 ├── .github/
 │   └── workflows/
-│       └── ci.yml             # Automated CI build and testing
+│       └── ci.yml                     # Windows CI build & test workflow
 ├── cmd/
 │   └── v2c/
-│       └── main.go            # Entry point, flag parsing & lifecycle management
+│       └── main.go                    # Entrypoint, flag parsing & orchestrator
 ├── internal/
+│   ├── sidecar/
+│   │   ├── process_windows.go         # SysProcAttr (CREATE_NO_WINDOW), Windows Job Object
+│   │   ├── extractor.go               # %LOCALAPPDATA%/v2c setup & port check
+│   │   └── sidecar_test.go            # Sidecar unit tests
 │   ├── audio/
-│   │   ├── recorder.go        # Malgo audio capture & in-memory WAV encoder
-│   │   └── recorder_test.go   # WAV header and duration tests
+│   │   ├── recorder.go                # MiniAudio (malgo) capture & in-memory WAV encoder
+│   │   └── recorder_test.go           # RIFF header verification tests
 │   ├── clipboard/
-│   │   ├── clipboard.go       # Clipboard writing & hallucination text cleanup
-│   │   └── clipboard_test.go  # Sanitization test suite
+│   │   ├── clipboard.go               # Clipboard writing, sanitization & MessageBeep
+│   │   └── clipboard_test.go          # Sanitization tests
 │   ├── hotkey/
-│   │   ├── listener.go        # Windows GetAsyncKeyState polling loop & chime
-│   │   └── listener_test.go   # Virtual key parsing tests
+│   │   ├── listener.go                # Low-overhead 15ms GetAsyncKeyState poller
+│   │   └── listener_test.go           # Key parsing tests
 │   └── whisper/
-│       ├── client.go          # HTTP client for whisper.cpp with retry logic
-│       ├── client_test.go     # Client tests with mock endpoints
-│       ├── process.go         # Subprocess supervisor for CUDA & CPU backends
-│       └── process_test.go    # Argument building tests
+│       ├── client.go                  # HTTP multipart client with retry logic
+│       ├── client_test.go             # Mock HTTP endpoint test suite
+│       ├── process.go                 # Process configuration utilities
+│       └── process_test.go            # Flag configuration tests
 ├── models/
-│   └── .gitkeep               # Model directory
+│   └── .gitkeep
 ├── .gitignore
 ├── go.mod
 ├── go.sum
-├── LICENSE                    # MIT License
+├── LICENSE                            # MIT License
 └── README.md
 ```
 

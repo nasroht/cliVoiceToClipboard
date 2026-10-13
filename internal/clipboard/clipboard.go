@@ -4,8 +4,14 @@ import (
 	"errors"
 	"regexp"
 	"strings"
+	"syscall"
 
 	atottoclipboard "github.com/atotto/clipboard"
+)
+
+var (
+	user32          = syscall.NewLazyDLL("user32.dll")
+	procMessageBeep = user32.NewProc("MessageBeep")
 )
 
 var (
@@ -66,4 +72,10 @@ func Write(raw string) (string, error) {
 // Read reads the current text from the clipboard.
 func Read() (string, error) {
 	return atottoclipboard.ReadAll()
+}
+
+// PlayChime triggers a short, non-intrusive native Windows chime via user32.dll MessageBeep(0).
+func PlayChime() {
+	// 0 corresponds to MB_OK: default notification sound
+	_, _, _ = procMessageBeep.Call(0)
 }

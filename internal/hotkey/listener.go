@@ -18,8 +18,8 @@ var (
 const (
 	// DefaultHotkeyF12 is 0x7B (VK_F12).
 	DefaultHotkeyF12 = 0x7B
-	// DefaultPollInterval is 10ms (100 Hz), providing sub-10ms responsiveness with ~0% CPU.
-	DefaultPollInterval = 10 * time.Millisecond
+	// DefaultPollInterval is 15ms (~66 Hz), providing sub-15ms responsiveness with near-zero CPU usage.
+	DefaultPollInterval = 15 * time.Millisecond
 
 	// MB_ICONASTERISK is the standard Windows information notification sound.
 	MB_ICONASTERISK = 0x00000040
