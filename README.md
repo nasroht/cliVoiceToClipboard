@@ -88,18 +88,15 @@ flowchart TD
 
 ## Quick Start Guide
 
-### 1. Download Precompiled whisper-server & Weights
+### 1. Automated Setup (Recommended)
 
-Precompiled releases are available directly from the [whisper.cpp Releases page](https://github.com/ggerganov/whisper.cpp/releases):
+Run the included PowerShell setup script to automatically query the latest `whisper.cpp` release, download the Windows CUDA runtime binaries (with cuBLAS and AVX-512 libraries) into `./bin/`, and fetch the `ggml-base.bin` model into `./models/`:
 
-* **For NVIDIA RTX 5080 (CUDA)**: Download `whisper-cublas-12.x-bin-x64.zip`. Place `whisper-server.exe` and its companion DLLs into `./bin/` or `%LOCALAPPDATA%\v2c\bin\`.
-* **For CPU AVX-512 (AMD Ryzen 7 9800X3D)**: Download `whisper-bin-x64.zip`. Place `whisper-server.exe` into `./bin/` or `%LOCALAPPDATA%\v2c\bin\`.
-
-#### Download Model Weights
 ```powershell
-# Fast base model (~142 MB):
-Invoke-WebRequest -Uri "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin" -OutFile "models/ggml-base.bin"
+powershell -ExecutionPolicy Bypass -File .\setup.ps1
 ```
+
+*(Alternatively, you can manually download `whisper-server.exe` and its companion DLLs from the [whisper.cpp Releases page](https://github.com/ggerganov/whisper.cpp/releases) and model weights from [Hugging Face](https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin)).*
 
 ---
 

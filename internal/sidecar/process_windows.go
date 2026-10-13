@@ -68,12 +68,11 @@ func BuildArguments(cfg ProcessConfig) []string {
 	}
 
 	if strings.ToLower(cfg.Backend) == "cpu" {
-		// CPU fallback: AMD Ryzen 7 9800X3D AVX-512 optimization
-		args = append(args, "-ngl", "0", "-t", strconv.Itoa(cfg.Threads))
+		// CPU fallback: AMD Ryzen 7 9800X3D AVX-512 optimization (-ng disables GPU)
+		args = append(args, "-ng", "-t", strconv.Itoa(cfg.Threads))
 	} else {
 		// CUDA acceleration: NVIDIA GeForce RTX 5080 (Blackwell)
-		// Offload all 99 layers to GPU VRAM for sub-100ms inference
-		args = append(args, "-ngl", "99")
+		// whisper-server offloads all model weights into GPU VRAM by default
 	}
 
 	return args

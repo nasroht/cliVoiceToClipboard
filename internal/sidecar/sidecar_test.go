@@ -37,7 +37,6 @@ func TestBuildArguments_CUDA(t *testing.T) {
 		"-m", "models/ggml-base.bin",
 		"--host", "127.0.0.1",
 		"--port", "8080",
-		"-ngl", "99",
 	}
 
 	if !reflect.DeepEqual(args, expected) {
@@ -60,7 +59,7 @@ func TestBuildArguments_CPU(t *testing.T) {
 		"-m", "models/ggml-base.bin",
 		"--host", "127.0.0.1",
 		"--port", "8080",
-		"-ngl", "0",
+		"-ng",
 		"-t", "6",
 	}
 
