@@ -1,0 +1,31 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test artifacts
+*.test
+*.out
+
+# Go build cache & dist
+bin/
+dist/
+
+# Whisper models (large binary weights)
+models/*.bin
+models/*.gguf
+!models/.gitkeep
+
+# OS files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+.DS_Store
+
+# IDE / Editor
+.idea/
+.vscode/
+*.swp
+*.swo
